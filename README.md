@@ -270,13 +270,9 @@ This project is licensed under the **MIT License**.
 
 ### Connect with Me
 
-**GitHub**
-
-https://github.com/yourusername
-
 **LinkedIn**
 
-https://linkedin.com/in/yourprofile
+https://www.linkedin.com/in/muhammad-sufyan-farzand-096a3b377/
 
 ---
 
