@@ -130,7 +130,7 @@ def run_cli_interactive():
 def run_flask_app(port=5000):
     """Launches Flask HTTP REST API server."""
     try:
-        from flask import Flask, request, jsonify
+        from flask import Flask, request, jsonify, render_template_string, send_from_directory
     except ImportError:
         print("Flask is not installed. Installing flask or running in CLI mode.")
         run_cli_interactive()
@@ -139,19 +139,131 @@ def run_flask_app(port=5000):
     app = Flask(__name__)
     recommender_service.initialize()
 
+    # Simple HTML template designed to display your custom tab image and the required credit footer
+    HTML_TEMPLATE = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Tech Stack Recommender API</title>
+        
+        <!-- Tab image link configuration -->
+        <!-- Replace 'favicon.png' with 'favicon.ico' or your specific image name if needed -->
+        <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+        
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background-color: #0f172a;
+                color: #e2e8f0;
+                margin: 0;
+                padding: 0;
+                display: flex;
+                flex-direction: column;
+                min-height: 100vh;
+            }
+            .container {
+                max-width: 800px;
+                margin: 60px auto;
+                padding: 35px;
+                background-color: #1e293b;
+                border-radius: 12px;
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+                flex: 1;
+            }
+            h1 {
+                color: #38bdf8;
+                font-size: 2.2rem;
+                margin-top: 0;
+                border-bottom: 2px solid #334155;
+                padding-bottom: 15px;
+            }
+            .status {
+                display: inline-block;
+                background-color: #10b981;
+                color: #ffffff;
+                padding: 6px 14px;
+                border-radius: 20px;
+                font-size: 0.85rem;
+                font-weight: 600;
+                margin-bottom: 25px;
+            }
+            .info-section {
+                margin-bottom: 30px;
+            }
+            .info-section h3 {
+                color: #94a3b8;
+                margin-bottom: 10px;
+                font-size: 1.1rem;
+            }
+            ul {
+                list-style-type: none;
+                padding: 0;
+            }
+            li {
+                background-color: #0f172a;
+                margin-bottom: 12px;
+                padding: 14px 18px;
+                border-radius: 8px;
+                border-left: 4px solid #38bdf8;
+            }
+            .endpoint-method {
+                font-weight: bold;
+                color: #38bdf8;
+                margin-right: 10px;
+            }
+            footer {
+                text-align: center;
+                padding: 25px;
+                color: #94a3b8;
+                background-color: #0f172a;
+                font-size: 0.95rem;
+                border-top: 1px solid #1e293b;
+                letter-spacing: 0.5px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🚀 Tech Stack Recommender API</h1>
+            <span class="status">● Service Status: Online & Ready</span>
+            
+            <div class="info-section">
+                <h3>About the Service</h3>
+                <p>This is a Content-Based Filtering recommendation service that utilizes <strong>TF-IDF Vectorization</strong> and <strong>Cosine Similarity</strong> to recommend technology stacks based on project requirements and developer skills.</p>
+            </div>
+
+            <div class="info-section">
+                <h3>Available Endpoints</h3>
+                <ul>
+                    <li><span class="endpoint-method">GET</span> <code>/api/stacks</code> - Retrieve dataset tech stacks</li>
+                    <li><span class="endpoint-method">POST</span> <code>/api/recommend</code> - Get TF-IDF Cosine Similarity recommendations</li>
+                    <li><span class="endpoint-method">POST</span> <code>/api/retrain</code> - Reload dataset and retrain vectorizer</li>
+                </ul>
+            </div>
+        </div>
+        
+        <footer>
+            This webapp is developed by Muhammad Sufiyan Farzad
+        </footer>
+    </body>
+    </html>
+    """
+
     @app.route('/', methods=['GET'])
     def home():
-        return jsonify({
-            'service': 'Tech Stack Recommender API',
-            'version': '1.0.0',
-            'algorithm': 'Content-Based Filtering (TF-IDF Vectorization + Cosine Similarity)',
-            'status': 'healthy',
-            'endpoints': {
-                'GET /api/stacks': 'Retrieve dataset tech stacks',
-                'POST /api/recommend': 'Get TF-IDF Cosine Similarity recommendations',
-                'POST /api/retrain': 'Reload dataset and retrain vectorizer'
-            }
-        })
+        # Renders the UI homepage with the favicon link and author signature
+        return render_template_string(HTML_TEMPLATE)
+
+    @app.route('/favicon.ico', methods=['GET'])
+    def favicon():
+        # Fallback route to specifically handle requests to '/favicon.ico'
+        static_dir = os.path.join(app.root_path, 'static')
+        # Checks if 'favicon.ico' exists inside the static folder. Otherwise, defaults to 'favicon.png'
+        filename = 'favicon.ico' if os.path.exists(os.path.join(static_dir, 'favicon.ico')) else 'favicon.png'
+        mimetype = 'image/vnd.microsoft.icon' if filename.endswith('.ico') else 'image/png'
+        return send_from_directory(static_dir, filename, mimetype=mimetype)
 
     @app.route('/api/stacks', methods=['GET'])
     def get_stacks():
