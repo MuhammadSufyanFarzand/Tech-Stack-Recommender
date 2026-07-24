@@ -15,6 +15,11 @@ from src.ingestion import SkillIngestor
 from src.vectorizer import TFIDFVectorizerModel
 from src.similarity import CosineSimilarityEngine
 
+# A safe, valid 1x1 transparent PNG byte-string fallback.
+# If your custom image is missing or cannot load, this serves instantly 
+# to satisfy the browser and prevent page/tab reload loops.
+BLANK_PNG = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc`\x00\x00\x00\x02\x00\x01H\xaf\xa4q\x00\x00\x00\x00IEND\xaeB`\x82'
+
 class TechStackRecommenderService:
     """
     Service orchestration layer connecting Ingestion, Vectorizer, and Similarity Engine.
@@ -42,7 +47,7 @@ class TechStackRecommenderService:
         print("⚡ Fitting TF-IDF Vectorizer model on corpus...")
         self.dataset_vectors = self.vectorizer.fit_transform(corpus)
 
-        # FIX: Ensure directory structure exists on host before saving file to prevent crash
+        # Ensure directory structure exists on host before saving file
         os.makedirs(os.path.dirname(self.model_file), exist_ok=True)
 
         # Save model weights to models/
@@ -133,9 +138,9 @@ def run_cli_interactive():
 def run_flask_app(port=5000):
     """Launches Flask HTTP REST API server."""
     try:
-        from flask import Flask, request, jsonify, render_template_string, send_from_directory
+        # Added Response to handle direct byte streams safely
+        from flask import Flask, request, jsonify, render_template_string, send_from_directory, Response
         
-        # FIX: Check if flask_cors is available to enable cross-origin requests
         try:
             from flask_cors import CORS
             has_cors = True
@@ -149,16 +154,14 @@ def run_flask_app(port=5000):
 
     app = Flask(__name__)
     
-    # FIX: Enable CORS if package is installed (resolves browser frontend blocking issues)
     if has_cors:
         CORS(app)
         print("🔓 CORS successfully enabled for all routes.")
     else:
-        print("⚠️ flask-cors is not installed. External websites may have issues querying this API.")
+        print("⚠️ flask-cors is not installed.")
 
     recommender_service.initialize()
 
-    # Simple HTML template designed to display your custom tab image and the required credit footer
     HTML_TEMPLATE = """
     <!DOCTYPE html>
     <html lang="en">
@@ -168,7 +171,7 @@ def run_flask_app(port=5000):
         <title>Tech Stack Recommender API</title>
         
         <!-- Tab image link configuration -->
-        <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+        <link rel="icon" type="image/png" href="{{ url_for('static_favicon') }}">
         
         <style>
             body {
@@ -273,12 +276,22 @@ def run_flask_app(port=5000):
     def home():
         return render_template_string(HTML_TEMPLATE)
 
+    # Route specifically overriding static requests to prevent 404 infinite reload loops
+    @app.route('/static/favicon.png', methods=['GET'])
     @app.route('/favicon.ico', methods=['GET'])
-    def favicon():
+    def static_favicon():
         static_dir = os.path.join(app.root_path, 'static')
-        filename = 'favicon.ico' if os.path.exists(os.path.join(static_dir, 'favicon.ico')) else 'favicon.png'
-        mimetype = 'image/vnd.microsoft.icon' if filename.endswith('.ico') else 'image/png'
-        return send_from_directory(static_dir, filename, mimetype=mimetype)
+        png_path = os.path.join(static_dir, 'favicon.png')
+        ico_path = os.path.join(static_dir, 'favicon.ico')
+        
+        # Try serving the physical files first if they exist
+        if os.path.exists(png_path):
+            return send_from_directory(static_dir, 'favicon.png', mimetype='image/png')
+        elif os.path.exists(ico_path):
+            return send_from_directory(static_dir, 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+        
+        # Safe fallback: Returns transparent 1x1 image instead of a 404 to stop browser tab flickering
+        return Response(BLANK_PNG, mimetype='image/png')
 
     @app.route('/api/stacks', methods=['GET'])
     def get_stacks():
@@ -296,7 +309,6 @@ def run_flask_app(port=5000):
             result = recommender_service.recommend_for_query(query, top_n=top_n)
             return jsonify({'status': 'success', 'data': result})
         except Exception as e:
-            # Clean logging of error back to the client to make debugging simpler
             return jsonify({'status': 'error', 'message': f'Server failed to process recommendation: {str(e)}'}), 500
 
     @app.route('/api/retrain', methods=['POST'])
@@ -305,13 +317,12 @@ def run_flask_app(port=5000):
         return jsonify({'status': 'success', 'message': 'Model retrained successfully'})
 
     print(f" Starting Flask REST API server on port {port}...")
-    app.run(host='0.0.0.0', port=port, debug=False) # Turned off debug=True for production environments
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 
 if __name__ == '__main__':
     if '--cli' in sys.argv:
         run_cli_interactive()
     else:
-        # FIX: Dynamically read the assigned port from environment variables
         assigned_port = int(os.environ.get("PORT", 5000))
         run_flask_app(port=assigned_port)
