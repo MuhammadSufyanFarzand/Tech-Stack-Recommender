@@ -2,19 +2,25 @@
 """
 Tech Stack Recommender - Main Application Entry Point
 Content-Based Filtering using TF-IDF Vectorization & Cosine Similarity.
+Ready for deployment on platforms like Vercel.
 """
 
 import os
 import sys
 import json
 from typing import List, Dict, Any
+from flask import Flask, request, jsonify, render_template_string, send_from_directory
 
+# Configure path resolution for imports
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from src.ingestion import SkillIngestor
 from src.vectorizer import TFIDFVectorizerModel
 from src.similarity import CosineSimilarityEngine
 
+# ==========================================
+# 1. CORE RECOMMENDER SERVICE CLASS
+# ==========================================
 class TechStackRecommenderService:
     """
     Service orchestration layer connecting Ingestion, Vectorizer, and Similarity Engine.
@@ -42,10 +48,17 @@ class TechStackRecommenderService:
         print("⚡ Fitting TF-IDF Vectorizer model on corpus...")
         self.dataset_vectors = self.vectorizer.fit_transform(corpus)
 
-        # Save model weights to models/
-        self.vectorizer.save_model(self.model_file)
+        # Attempt to save model, catching permission errors on read-only serverless filesystems
+        try:
+            if not os.path.exists(self.model_dir):
+                os.makedirs(self.model_dir, exist_ok=True)
+            self.vectorizer.save_model(self.model_file)
+            print(f"📁 Model saved successfully to {self.model_file}")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not write model file (likely read-only serverless filesystem): {e}")
+
         self.is_initialized = True
-        print(f"✅ Initialized recommender with {len(self.processed_records)} tech stacks and {len(self.vectorizer.get_feature_names())} TF-IDF vocabulary terms.")
+        print(f"✅ Initialized recommender with {len(self.processed_records)} tech stacks.")
 
     def recommend_for_query(self, query_text: str, top_n: int = 5, min_score: float = 0.0) -> Dict[str, Any]:
         """
@@ -93,11 +106,311 @@ class TechStackRecommenderService:
         ]
 
 
+# Initialize service instance
 recommender_service = TechStackRecommenderService()
 
+# ==========================================
+# 2. TOP-LEVEL GLOBAL FLASK INSTANCE FOR VERCEL
+# ==========================================
+app = Flask(__name__)
 
+
+# ==========================================
+# 3. WEBPAGE FRONTEND HTML TEMPLATE
+# ==========================================
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tech Stack Recommender</title>
+    
+    <!-- Tab image configuration pointing to your custom static/logo.png file -->
+    <link rel="icon" type="image/png" href="/static/logo.png">
+    <link rel="shortcut icon" type="image/png" href="/static/logo.png">
+
+    <style>
+        :root {
+            --primary-color: #3b82f6;
+            --background-color: #f3f4f6;
+            --card-color: #ffffff;
+            --text-color: #1f2937;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        .main-container {
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            flex-grow: 1;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .header img {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            object-fit: cover;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .header h1 {
+            margin: 10px 0 5px;
+            font-size: 2.2rem;
+            font-weight: 800;
+        }
+        .header p {
+            color: #4b5563;
+            margin-top: 0;
+        }
+        .search-card {
+            background-color: var(--card-color);
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            margin-bottom: 30px;
+        }
+        textarea {
+            width: 100%;
+            box-sizing: border-box;
+            height: 100px;
+            border-radius: 8px;
+            border: 1px solid #d1d5db;
+            padding: 12px;
+            font-size: 1rem;
+            font-family: inherit;
+            resize: vertical;
+            outline-color: var(--primary-color);
+        }
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 15px;
+        }
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            font-weight: 600;
+            transition: opacity 0.2s;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        .results-container h2 {
+            font-size: 1.4rem;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 8px;
+            margin-bottom: 15px;
+        }
+        .stack-card {
+            background-color: var(--card-color);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.05);
+        }
+        .stack-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #f3f4f6;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        .stack-name {
+            font-weight: 700;
+            font-size: 1.2rem;
+        }
+        .badge {
+            background-color: #eff6ff;
+            color: #1e40af;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .score {
+            font-size: 0.9rem;
+            color: #10b981;
+            font-weight: 700;
+        }
+        .meta-line {
+            font-size: 0.9rem;
+            margin: 6px 0;
+        }
+        .meta-line strong {
+            color: #4b5563;
+        }
+        footer {
+            text-align: center;
+            padding: 25px 10px;
+            margin-top: auto;
+            background-color: #ffffff;
+            font-size: 0.95rem;
+            font-weight: 500;
+            color: #4b5563;
+            border-top: 1px solid #e5e7eb;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+        <div class="header">
+            <!-- Tries to show the set logo icon, otherwise uses fallback image/placeholder -->
+            <img src="/static/logo.png" onerror="this.src='https://placehold.co/100x100?text=Logo'" alt="App Logo">
+            <h1>Tech Stack Recommender</h1>
+            <p>Content-Based Filtering via TF-IDF Vectorization & Cosine Similarity</p>
+        </div>
+
+        <div class="search-card">
+            <textarea id="queryInput" placeholder="Describe your project (e.g., 'Looking for a Python backend with FastAPI, PostgreSQL, and Docker...')"></textarea>
+            <div class="controls">
+                <label>
+                    Top Results:
+                    <select id="topNSelect" style="padding: 6px; border-radius: 4px; border: 1px solid #d1d5db;">
+                        <option value="3" selected>3</option>
+                        <option value="5">5</option>
+                        <option value="10">10</option>
+                    </select>
+                </label>
+                <button onclick="getRecommendations()">Analyze Stack</button>
+            </div>
+        </div>
+
+        <div class="results-container" id="resultsSection" style="display: none;">
+            <h2>Recommendations</h2>
+            <div id="resultsList"></div>
+        </div>
+    </div>
+
+    <!-- Attribution Footer displayed when scrolling to the end of the page -->
+    <footer>
+        This webapp is developed by Muhammad Sufiyan Farzad.
+    </footer>
+
+    <script>
+        async function getRecommendations() {
+            const query = document.getElementById('queryInput').value.trim();
+            const topN = document.getElementById('topNSelect').value;
+            if (!query) {
+                alert('Please provide some skills or project descriptions first.');
+                return;
+            }
+
+            const resultsSection = document.getElementById('resultsSection');
+            const resultsList = document.getElementById('resultsList');
+            
+            resultsList.innerHTML = '<p style="text-align:center; color:#6b7280;">Computing similarities...</p>';
+            resultsSection.style.display = 'block';
+
+            try {
+                const response = await fetch('/api/recommend', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query, top_n: parseInt(topN) })
+                });
+                
+                const responseData = await response.json();
+                
+                if (responseData.status === 'success' && responseData.data.recommendations.length > 0) {
+                    resultsList.innerHTML = '';
+                    responseData.data.recommendations.forEach(r => {
+                        const terms = r.matching_terms ? r.matching_terms.map(t => t.term).join(', ') : 'None';
+                        
+                        const card = document.createElement('div');
+                        card.className = 'stack-card';
+                        card.innerHTML = `
+                            <div class="stack-header">
+                                <span class="stack-name">${r.stack_name}</span>
+                                <span class="badge">${r.category}</span>
+                            </div>
+                            <div class="meta-line"><span class="score">Match: ${r.match_percentage}%</span></div>
+                            <div class="meta-line"><strong>Primary Language:</strong> ${r.primary_language || 'N/A'}</div>
+                            <div class="meta-line"><strong>Frameworks:</strong> ${r.frameworks_libraries || 'N/A'}</div>
+                            <div class="meta-line"><strong>Databases:</strong> ${r.database_storage || 'N/A'}</div>
+                            <div class="meta-line"><strong>Matching Terms:</strong> ${terms || 'General alignment'}</div>
+                        `;
+                        resultsList.appendChild(card);
+                    });
+                } else {
+                    resultsList.innerHTML = '<p style="text-align:center; color:#ef4444;">No highly similar matching stacks found.</p>';
+                }
+            } catch (error) {
+                console.error(error);
+                resultsList.innerHTML = '<p style="text-align:center; color:#ef4444;">Could not process the recommendation request.</p>';
+            }
+        }
+    </script>
+</body>
+</html>
+"""
+
+# ==========================================
+# 4. HTTP FLASK ROUTING DEFINITIONS
+# ==========================================
+
+@app.route('/', methods=['GET'])
+def index():
+    """Serves the main interactive dashboard webpage."""
+    return render_template_string(HTML_TEMPLATE)
+
+
+@app.route('/favicon.ico', methods=['GET'])
+def favicon():
+    """Serves the tab icon favicon from the static directory."""
+    static_dir = os.path.join(app.root_path, 'static')
+    if os.path.exists(os.path.join(static_dir, 'logo.png')):
+        return send_from_directory(static_dir, 'logo.png', mimetype='image/png')
+    elif os.path.exists(os.path.join(static_dir, 'favicon.ico')):
+        return send_from_directory(static_dir, 'favicon.ico', mimetype='image/x-icon')
+    return '', 204
+
+
+@app.route('/api/stacks', methods=['GET'])
+def get_stacks():
+    """Retrieve dataset tech stacks."""
+    return jsonify({'status': 'success', 'data': recommender_service.get_all_stacks()})
+
+
+@app.route('/api/recommend', methods=['POST'])
+def recommend():
+    """Get TF-IDF Cosine Similarity recommendations based on query."""
+    data = request.get_json(force=True) or {}
+    query = data.get('query', '')
+    top_n = int(data.get('top_n', 5))
+    if not query:
+        return jsonify({'status': 'error', 'message': 'Missing query parameter'}), 400
+
+    result = recommender_service.recommend_for_query(query, top_n=top_n)
+    return jsonify({'status': 'success', 'data': result})
+
+
+@app.route('/api/retrain', methods=['POST'])
+def retrain():
+    """Reload dataset and retrain vectorizer."""
+    recommender_service.initialize(force_retrain=True)
+    return jsonify({'status': 'success', 'message': 'Model retrained successfully'})
+
+
+# Helper function for local execution
 def run_cli_interactive():
-    """Runs interactive command-line interface for recommendation testing."""
+    """Runs interactive command-line interface for local recommendation testing."""
     print("=" * 65)
     print("🚀 TECH STACK RECOMMENDER - TF-IDF & COSINE SIMILARITY DEMO")
     print("=" * 65)
@@ -105,7 +418,7 @@ def run_cli_interactive():
 
     while True:
         print("\nEnter target project requirements, job roles, or developer skills:")
-        print("(e.g., 'Looking for a Python backend with FastAPI, PostgreSQL, Docker for ML microservices')")
+        print("(e.g., 'Looking for a Python backend with FastAPI, PostgreSQL, Docker')")
         user_input = input("\n👉 Query (or 'q' to quit): ").strip()
 
         if not user_input or user_input.lower() in {'q', 'quit', 'exit'}:
@@ -127,170 +440,12 @@ def run_cli_interactive():
             print("-" * 65)
 
 
-def run_flask_app(port=5000):
-    """Launches Flask HTTP REST API server."""
-    try:
-        from flask import Flask, request, jsonify, render_template_string, send_from_directory
-    except ImportError:
-        print("Flask is not installed. Installing flask or running in CLI mode.")
-        run_cli_interactive()
-        return
-
-    app = Flask(__name__)
-    recommender_service.initialize()
-
-    # Simple HTML template designed to display your custom tab image and the required credit footer
-    HTML_TEMPLATE = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Tech Stack Recommender API</title>
-        
-        <!-- Tab image link configuration -->
-        <!-- Replace 'favicon.png' with 'favicon.ico' or your specific image name if needed -->
-        <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-        
-        <style>
-            body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background-color: #0f172a;
-                color: #e2e8f0;
-                margin: 0;
-                padding: 0;
-                display: flex;
-                flex-direction: column;
-                min-height: 100vh;
-            }
-            .container {
-                max-width: 800px;
-                margin: 60px auto;
-                padding: 35px;
-                background-color: #1e293b;
-                border-radius: 12px;
-                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
-                flex: 1;
-            }
-            h1 {
-                color: #38bdf8;
-                font-size: 2.2rem;
-                margin-top: 0;
-                border-bottom: 2px solid #334155;
-                padding-bottom: 15px;
-            }
-            .status {
-                display: inline-block;
-                background-color: #10b981;
-                color: #ffffff;
-                padding: 6px 14px;
-                border-radius: 20px;
-                font-size: 0.85rem;
-                font-weight: 600;
-                margin-bottom: 25px;
-            }
-            .info-section {
-                margin-bottom: 30px;
-            }
-            .info-section h3 {
-                color: #94a3b8;
-                margin-bottom: 10px;
-                font-size: 1.1rem;
-            }
-            ul {
-                list-style-type: none;
-                padding: 0;
-            }
-            li {
-                background-color: #0f172a;
-                margin-bottom: 12px;
-                padding: 14px 18px;
-                border-radius: 8px;
-                border-left: 4px solid #38bdf8;
-            }
-            .endpoint-method {
-                font-weight: bold;
-                color: #38bdf8;
-                margin-right: 10px;
-            }
-            footer {
-                text-align: center;
-                padding: 25px;
-                color: #94a3b8;
-                background-color: #0f172a;
-                font-size: 0.95rem;
-                border-top: 1px solid #1e293b;
-                letter-spacing: 0.5px;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🚀 Tech Stack Recommender API</h1>
-            <span class="status">● Service Status: Online & Ready</span>
-            
-            <div class="info-section">
-                <h3>About the Service</h3>
-                <p>This is a Content-Based Filtering recommendation service that utilizes <strong>TF-IDF Vectorization</strong> and <strong>Cosine Similarity</strong> to recommend technology stacks based on project requirements and developer skills.</p>
-            </div>
-
-            <div class="info-section">
-                <h3>Available Endpoints</h3>
-                <ul>
-                    <li><span class="endpoint-method">GET</span> <code>/api/stacks</code> - Retrieve dataset tech stacks</li>
-                    <li><span class="endpoint-method">POST</span> <code>/api/recommend</code> - Get TF-IDF Cosine Similarity recommendations</li>
-                    <li><span class="endpoint-method">POST</span> <code>/api/retrain</code> - Reload dataset and retrain vectorizer</li>
-                </ul>
-            </div>
-        </div>
-        
-        <footer>
-            This webapp is developed by Muhammad Sufiyan Farzad
-        </footer>
-    </body>
-    </html>
-    """
-
-    @app.route('/', methods=['GET'])
-    def home():
-        # Renders the UI homepage with the favicon link and author signature
-        return render_template_string(HTML_TEMPLATE)
-
-    @app.route('/favicon.ico', methods=['GET'])
-    def favicon():
-        # Fallback route to specifically handle requests to '/favicon.ico'
-        static_dir = os.path.join(app.root_path, 'static')
-        # Checks if 'favicon.ico' exists inside the static folder. Otherwise, defaults to 'favicon.png'
-        filename = 'favicon.ico' if os.path.exists(os.path.join(static_dir, 'favicon.ico')) else 'favicon.png'
-        mimetype = 'image/vnd.microsoft.icon' if filename.endswith('.ico') else 'image/png'
-        return send_from_directory(static_dir, filename, mimetype=mimetype)
-
-    @app.route('/api/stacks', methods=['GET'])
-    def get_stacks():
-        return jsonify({'status': 'success', 'data': recommender_service.get_all_stacks()})
-
-    @app.route('/api/recommend', methods=['POST'])
-    def recommend():
-        data = request.get_json(force=True) or {}
-        query = data.get('query', '')
-        top_n = int(data.get('top_n', 5))
-        if not query:
-            return jsonify({'status': 'error', 'message': 'Missing query parameter'}), 400
-
-        result = recommender_service.recommend_for_query(query, top_n=top_n)
-        return jsonify({'status': 'success', 'data': result})
-
-    @app.route('/api/retrain', methods=['POST'])
-    def retrain():
-        recommender_service.initialize(force_retrain=True)
-        return jsonify({'status': 'success', 'message': 'Model retrained successfully'})
-
-    print(f" Starting Flask REST API server on port {port}...")
-    app.run(host='0.0.0.0', port=port, debug=True)
-
-
 if __name__ == '__main__':
+    # Initialize model locally before launching server
+    recommender_service.initialize()
+    
     if '--cli' in sys.argv:
         run_cli_interactive()
     else:
-        run_flask_app()
+        # Run local debug server
+        app.run(host='0.0.0.0', port=5000, debug=True)
