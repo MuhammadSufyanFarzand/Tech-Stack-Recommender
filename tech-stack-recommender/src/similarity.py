@@ -67,6 +67,7 @@ class CosineSimilarityEngine:
                             'contribution': round(contribution, 4)
                         })
 
+                # Sort matching terms by contribution descending
                 matching_terms.sort(key=lambda x: x['contribution'], reverse=True)
 
                 results.append({

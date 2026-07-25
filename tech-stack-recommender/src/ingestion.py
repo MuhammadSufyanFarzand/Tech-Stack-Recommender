@@ -104,6 +104,7 @@ class SkillIngestor:
             infra = str(row.get('infrastructure_tools', ''))
             description = str(row.get('skills_description', ''))
 
+            # Weight primary language and frameworks higher by repeating them in feature string
             raw_feature_string = f"{stack_name} {category} {roles} {primary_lang} {primary_lang} {frameworks} {frameworks} {database} {infra} {description}"
             cleaned_features = self.clean_text(raw_feature_string)
 

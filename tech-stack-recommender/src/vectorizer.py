@@ -52,8 +52,10 @@ class TFIDFVectorizerModel:
             self.vocabulary_ = self.sklearn_vectorizer.vocabulary_
             return tfidf_matrix.toarray().tolist()
 
+        # Pure Python standard math implementation fallback
         doc_ngrams_list = [self._generate_ngrams(doc) for doc in corpus]
         
+        # Count document frequencies across corpus
         doc_freq: Dict[str, int] = {}
         term_total_freq: Dict[str, int] = {}
 
@@ -64,6 +66,7 @@ class TFIDFVectorizerModel:
             for term in doc_ngrams:
                 term_total_freq[term] = term_total_freq.get(term, 0) + 1
 
+        # Select top max_features by total frequency
         sorted_terms = sorted(term_total_freq.keys(), key=lambda t: term_total_freq[t], reverse=True)
         top_terms = sorted_terms[:self.max_features] if self.max_features else sorted_terms
 
@@ -71,16 +74,19 @@ class TFIDFVectorizerModel:
         self.feature_names_ = top_terms
 
         num_docs = len(corpus)
+        # Compute IDF: idf(t) = log((1 + N) / (1 + df(t))) + 1
         self.idf_weights_ = [
             math.log((1.0 + num_docs) / (1.0 + doc_freq.get(term, 0))) + 1.0
             for term in top_terms
         ]
 
+        # Compute TF-IDF matrix for each doc
         matrix = []
         for doc_ngrams in doc_ngrams_list:
             vector = [0.0] * len(top_terms)
             total_tokens = max(1, len(doc_ngrams))
             
+            # Count term frequencies in document
             tf_counts: Dict[str, int] = {}
             for term in doc_ngrams:
                 if term in self.vocabulary_:
@@ -88,9 +94,11 @@ class TFIDFVectorizerModel:
 
             for term, count in tf_counts.items():
                 idx = self.vocabulary_[term]
+                # Sublinear TF scaling: 1 + log(tf)
                 tf_val = 1.0 + math.log(count)
                 vector[idx] = tf_val * self.idf_weights_[idx]
 
+            # L2 Euclidean normalization
             squared_sum = sum(v * v for v in vector)
             norm = math.sqrt(squared_sum) if squared_sum > 0 else 1.0
             norm_vector = [v / norm for v in vector]
